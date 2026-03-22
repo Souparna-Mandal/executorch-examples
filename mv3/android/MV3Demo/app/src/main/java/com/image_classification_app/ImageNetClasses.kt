@@ -6,7 +6,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-package org.pytorch.executorchexamples.mv3
+package com.image_classification_app
 
 object ImageNetClasses {
     val IMAGENET_CLASSES = arrayOf(

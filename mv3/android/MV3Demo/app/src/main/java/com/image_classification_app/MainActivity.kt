@@ -6,7 +6,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-package org.pytorch.executorchexamples.mv3
+package com.image_classification_app
 
 import android.Manifest
 import android.content.pm.PackageManager
@@ -52,6 +52,7 @@ import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -86,6 +87,14 @@ class MainActivity : ComponentActivity() {
         }
 
         modelPath = filesDir.absolutePath + "/" + MODEL_FILENAME
+
+        if (MaseOptimise.isBenchmarkIntent(intent)) {
+            lifecycleScope.launch(Dispatchers.Default) {
+                MaseOptimise.runBenchmark(this@MainActivity, intent)
+                withContext(Dispatchers.Main) { finish() }
+            }
+            return
+        }
 
         setContent {
             MV3App()
