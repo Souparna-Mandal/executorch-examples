@@ -1,7 +1,9 @@
 package com.image_classification_app
 
+import android.annotation.SuppressLint
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.os.Build
 import android.os.SystemClock
 import android.util.Log
 import androidx.activity.ComponentActivity
@@ -34,6 +36,10 @@ object MaseOptimise {
     private const val TAG = "MaseOptimise"
     private const val VAL_ANNOTATIONS_FILE = "val_annotations.txt"
     private val IMAGE_EXTENSIONS = setOf("jpg", "jpeg", "png", "webp")
+
+    /** Log first N samples at DEBUG; then every [every]th sample (avoid logcat flood on full val). */
+    private const val BENCHMARK_LOG_FIRST = 32
+    private const val BENCHMARK_LOG_EVERY = 100
 
     fun isBenchmarkIntent(intent: Intent?): Boolean =
         intent?.action == ACTION_BENCHMARK
@@ -120,16 +126,26 @@ object MaseOptimise {
                     TensorImageUtils.TORCHVISION_NORM_MEAN_RGB,
                     TensorImageUtils.TORCHVISION_NORM_STD_RGB
                 )
-                if (bitmap.config != Bitmap.Config.HARDWARE) {
-                    bitmap.recycle()
-                }
+                safeRecycleAfterTensor(bitmap)
 
                 val start = SystemClock.elapsedRealtimeNanos()
                 val outputTensor = module.forward(EValue.from(inputTensor))[0].toTensor()
                 latenciesNs[i] = SystemClock.elapsedRealtimeNanos() - start
 
-                val pred = argmax(outputTensor.dataAsFloatArray)
+                val logits = outputTensor.dataAsFloatArray
+                val pred = argmax(logits)
                 if (pred == labelIndex) correct++
+
+                if (i == 0) {
+                    Log.i(TAG, "logits.size=${logits.size} num_samples=${samples.size} split=$split")
+                }
+                if (i < BENCHMARK_LOG_FIRST || i % BENCHMARK_LOG_EVERY == 0) {
+                    Log.i(
+                        TAG,
+                        "[$i] pred=$pred (${tinyHumanLabel(pred)}) | true=$labelIndex (${tinyHumanLabel(labelIndex)}) | " +
+                            "match=${pred == labelIndex} | file=${imageFile.name}"
+                    )
+                }
             }
         } catch (e: Exception) {
             Log.e(TAG, "eval loop failed", e)
@@ -297,6 +313,24 @@ object MaseOptimise {
             Log.w(TAG, "decode failed: ${file.absolutePath}", e)
             null
         }
+    }
+
+    /**
+     * Do not recycle hardware bitmaps on API 26+ (Bitmap.Config.HARDWARE is API 26 only — guard for minSdk 24).
+     */
+    @SuppressLint("NewApi")
+    private fun safeRecycleAfterTensor(bitmap: Bitmap) {
+        val isHardware =
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && bitmap.config == Bitmap.Config.HARDWARE
+        if (!isHardware) {
+            bitmap.recycle()
+        }
+    }
+
+    /** Debug label text; array order may not match wnid sort — indices are authoritative. */
+    private fun tinyHumanLabel(classIndex: Int): String {
+        val a = ImageNetClasses.TINY_IMAGENET_200_CLASSES
+        return if (classIndex in a.indices) a[classIndex] else "idx:$classIndex"
     }
 
     private fun argmax(scores: FloatArray): Int {
