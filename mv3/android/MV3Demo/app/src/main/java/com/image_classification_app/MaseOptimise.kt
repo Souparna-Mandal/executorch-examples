@@ -32,14 +32,16 @@ object MaseOptimise {
     const val EXTRA_MODEL_NAME = "model_name"
     const val EXTRA_DATASET_SUBDIR = "dataset_subdir"
     const val EXTRA_OUT_NAME = "out_name"
+    /** Cap images evaluated (intent extra). Omit or ≤0 = use full sample list. */
+    const val EXTRA_MAX_IMAGES = "max_images"
 
     private const val TAG = "MaseOptimise"
     private const val VAL_ANNOTATIONS_FILE = "val_annotations.txt"
     private val IMAGE_EXTENSIONS = setOf("jpg", "jpeg", "png", "webp")
 
-    /** Log first N samples at DEBUG; then every [every]th sample (avoid logcat flood on full val). */
-    private const val BENCHMARK_LOG_FIRST = 32
-    private const val BENCHMARK_LOG_EVERY = 100
+    /** Log first N samples; then every [every]th sample (avoid logcat flood on full val). */
+    private const val BENCHMARK_LOG_FIRST = 3
+    private const val BENCHMARK_LOG_EVERY = 20000
 
     fun isBenchmarkIntent(intent: Intent?): Boolean =
         intent?.action == ACTION_BENCHMARK
@@ -57,10 +59,12 @@ object MaseOptimise {
         val outName = intent.getStringExtra(EXTRA_OUT_NAME) ?: defaultOut
 
         val outFile = File(filesDir, outName)
+        val maxImagesExtra = intent.getIntExtra(EXTRA_MAX_IMAGES, -1)
 
         val json = JSONObject()
         json.put("trial_id", trialId)
         json.put("split", splitRaw ?: "")
+        json.put("status", "error")
 
         val split = when (splitRaw) {
             "train", "val", "test" -> splitRaw
@@ -92,6 +96,14 @@ object MaseOptimise {
             return
         }
 
+        val totalInSplit = samples.size
+        val toRun: List<Pair<File, Int>> =
+            if (maxImagesExtra > 0 && samples.size > maxImagesExtra) {
+                samples.take(maxImagesExtra)
+            } else {
+                samples
+            }
+
         val modelFile = File(filesDir, modelName)
         if (!modelFile.isFile) {
             putErrorDefaults(json, "model file missing: ${modelFile.absolutePath}")
@@ -108,16 +120,19 @@ object MaseOptimise {
             return
         }
 
-        val latenciesNs = LongArray(samples.size)
+        val latenciesNs = LongArray(toRun.size)
         var correct = 0
         var peakUsedMb = 0L
+        var decodeFailures = 0
+        var validForwardCount = 0
 
         try {
-            samples.forEachIndexed { i, (imageFile, labelIndex) ->
+            toRun.forEachIndexed { i, (imageFile, labelIndex) ->
                 trackPeakMb()?.let { peakUsedMb = maxOf(peakUsedMb, it) }
 
                 val bitmap = decodeAndResize224(imageFile) ?: run {
                     latenciesNs[i] = 0L
+                    decodeFailures++
                     return@forEachIndexed
                 }
 
@@ -131,13 +146,17 @@ object MaseOptimise {
                 val start = SystemClock.elapsedRealtimeNanos()
                 val outputTensor = module.forward(EValue.from(inputTensor))[0].toTensor()
                 latenciesNs[i] = SystemClock.elapsedRealtimeNanos() - start
+                validForwardCount++
 
                 val logits = outputTensor.dataAsFloatArray
                 val pred = argmax(logits)
                 if (pred == labelIndex) correct++
 
                 if (i == 0) {
-                    Log.i(TAG, "logits.size=${logits.size} num_samples=${samples.size} split=$split")
+                    Log.i(
+                        TAG,
+                        "logits.size=${logits.size} num_eval=${toRun.size} num_split=$totalInSplit split=$split"
+                    )
                 }
                 if (i < BENCHMARK_LOG_FIRST || i % BENCHMARK_LOG_EVERY == 0) {
                     Log.i(
@@ -164,28 +183,43 @@ object MaseOptimise {
             validLatencies[idx].toDouble() / 1_000_000.0
         }
 
-        val top1 = correct.toDouble() / samples.size.toDouble()
+        val top1 =
+            if (toRun.isEmpty()) 0.0 else correct.toDouble() / toRun.size.toDouble()
         json.put("top1_acc", top1)
         json.put("latency_p95_ms", p95Ms)
-        json.put("num_samples", samples.size)
+        json.put("num_samples", toRun.size)
+        if (toRun.size != totalInSplit) {
+            json.put("num_samples_total_split", totalInSplit)
+        }
+        json.put("valid_forward_count", validForwardCount)
+        json.put("decode_failures", decodeFailures)
         json.put("memory_peak_mb", peakUsedMb.toDouble())
         json.put("error", JSONObject.NULL)
+        json.put("status", "done")
         writeJson(outFile, json)
         Log.i(TAG, "Wrote metrics to ${outFile.absolutePath}")
     }
 
     private fun putErrorDefaults(json: JSONObject, message: String) {
+        json.put("status", "error")
         json.put("error", message)
         json.put("top1_acc", 0.0)
         json.put("latency_p95_ms", 999.0)
         json.put("num_samples", 0)
+        json.put("valid_forward_count", 0)
+        json.put("decode_failures", 0)
         json.put("memory_peak_mb", 0.0)
         Log.e(TAG, message)
     }
 
     private fun writeJson(file: File, json: JSONObject) {
         file.parentFile?.mkdirs()
-        file.writeText(json.toString())
+        val tmp = File(file.parentFile, file.name + ".tmp")
+        tmp.writeText(json.toString())
+        if (!tmp.renameTo(file)) {
+            tmp.copyTo(file, overwrite = true)
+            tmp.delete()
+        }
     }
 
     private fun collectSamples(
