@@ -12,6 +12,7 @@ import org.json.JSONObject
 import org.pytorch.executorch.EValue
 import org.pytorch.executorch.Module
 import java.io.File
+import kotlin.random.Random
 
 /**
  * Optuna / adb automation: eval under [ComponentActivity.getFilesDir]; metrics JSON is written to the
@@ -32,10 +33,16 @@ object MaseOptimise {
     const val EXTRA_MODEL_NAME = "model_name"
     const val EXTRA_DATASET_SUBDIR = "dataset_subdir"
     const val EXTRA_OUT_NAME = "out_name"
-    /** Cap images evaluated (intent extra). Omit or ≤0 = use full sample list. */
+    /**
+     * Cap images evaluated (intent extra). Omit or ≤0 = use full sample list in deterministic order.
+     * When set and smaller than the split size, a **uniform random subset without replacement** is used
+     * (same for Tiny ImageNet val and ImageFolder train/test), with a fixed RNG seed for repeatability.
+     */
     const val EXTRA_MAX_IMAGES = "max_images"
 
     private const val TAG = "MaseOptimise"
+    /** Seed for [Random] when subsampling with [EXTRA_MAX_IMAGES] (hardcoded default). */
+    private const val BENCHMARK_SUBSAMPLE_SEED = 42L
     private const val VAL_ANNOTATIONS_FILE = "val_annotations.txt"
     private val IMAGE_EXTENSIONS = setOf("jpg", "jpeg", "png", "webp")
 
@@ -99,7 +106,12 @@ object MaseOptimise {
         val totalInSplit = samples.size
         val toRun: List<Pair<File, Int>> =
             if (maxImagesExtra > 0 && samples.size > maxImagesExtra) {
-                samples.take(maxImagesExtra)
+                samples.shuffled(Random(BENCHMARK_SUBSAMPLE_SEED)).take(maxImagesExtra).also {
+                    Log.i(
+                        TAG,
+                        "eval random subset: ${it.size}/$totalInSplit images (split=$split, seed=$BENCHMARK_SUBSAMPLE_SEED)"
+                    )
+                }
             } else {
                 samples
             }
