@@ -6,7 +6,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-package org.pytorch.executorchexamples.mv3
+package com.image_classification_app
 
 import android.Manifest
 import android.content.pm.PackageManager
@@ -52,6 +52,7 @@ import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -68,7 +69,7 @@ import kotlin.math.exp
 class MainActivity : ComponentActivity() {
     companion object {
         private const val MODEL_URL = "https://ossci-android.s3.amazonaws.com/executorch/models/snapshot-20260123/mv3_xnnpack_fp32.pte"
-        private const val MODEL_FILENAME = "mv3.pte"
+        private const val MODEL_FILENAME = "model.pte"
     }
 
     private var module: Module? = null
@@ -86,6 +87,14 @@ class MainActivity : ComponentActivity() {
         }
 
         modelPath = filesDir.absolutePath + "/" + MODEL_FILENAME
+
+        if (MaseOptimise.isBenchmarkIntent(intent)) {
+            lifecycleScope.launch(Dispatchers.Default) {
+                MaseOptimise.runBenchmark(this@MainActivity, intent)
+                withContext(Dispatchers.Main) { finish() }
+            }
+            return
+        }
 
         setContent {
             MV3App()
@@ -503,8 +512,8 @@ class MainActivity : ComponentActivity() {
             val top3 = getTopK(scores, 3)
             
             val results = top3.map { (index, score) ->
-                val label = if (index in ImageNetClasses.IMAGENET_CLASSES.indices) {
-                    ImageNetClasses.IMAGENET_CLASSES[index]
+                val label = if (index in ImageNetClasses.TINY_IMAGENET_200_CLASSES.indices) {
+                    ImageNetClasses.TINY_IMAGENET_200_CLASSES[index]
                 } else {
                     "Unknown($index)"
                 }

@@ -70,8 +70,8 @@ The app includes an instrumentation test that validates the complete image class
 3. **Run the test**:
     ```bash
     adb shell am instrument -w -r \
-      -e class 'org.pytorch.executorchexamples.mv3.UIWorkflowTest#testCatImageClassification' \
-      org.pytorch.executorchexamples.mv3.test/androidx.test.runner.AndroidJUnitRunner
+      -e class 'com.image_classification_app.UIWorkflowTest#testCatImageClassification' \
+      com.image_classification_app.test/androidx.test.runner.AndroidJUnitRunner
     ```
 
     Or run all tests via Gradle:

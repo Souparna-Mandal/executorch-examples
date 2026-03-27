@@ -13,11 +13,11 @@ plugins {
 }
 
 android {
-    namespace = "org.pytorch.executorchexamples.mv3"
+    namespace = "com.image_classification_app"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "org.pytorch.executorchexamples.mv3"
+        applicationId = "com.image_classification_app"
         minSdk = 24
         targetSdk = 35
         versionCode = 1
